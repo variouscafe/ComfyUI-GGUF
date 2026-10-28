@@ -268,6 +268,27 @@ def strip_quant_suffix(name):
         name = name[:match.start()]
     return name
 
+def qwen3vl_vision_fixup(vsd):
+    # Qwen3-VL (MiniMax H3) mmproj specifics:
+    #  - deepstack mergers are keyed by vision block index (v.deepstack.8.*)
+    #    but comfy expects a dense ModuleList (visual.deepstack_merger_list.0.*)
+    #  - fused attention is named attn_qkv but the module is attn.qkv
+    import re
+    idxs = sorted({int(m.group(1)) for k in vsd
+                   for m in [re.match(r"v\.deepstack\.(\d+)\.", k)] if m})
+    out = {}
+    for k, v in vsd.items():
+        m = re.match(r"v\.deepstack\.(\d+)\.(fc1|fc2|norm)\.(.+)$", k)
+        if m:
+            blk, part, rest = int(m.group(1)), m.group(2), m.group(3)
+            part = "linear_" + part if part.startswith("fc") else part
+            k = f"visual.deepstack_merger_list.{idxs.index(blk)}.{part}.{rest}"
+        elif ".attn_qkv." in k:
+            k = k.replace(".attn_qkv.", ".attn.qkv.")
+        out[k] = v
+    return out
+
+
 def gguf_mmproj_loader(path):
     # Reverse version of Qwen2VLVisionModel.modify_tensors
     logging.info("Attenpting to find mmproj file for text encoder...")
@@ -500,6 +521,11 @@ def gguf_clip_loader(path):
             sd = llama_permute(sd, 32, 8) # L3 / Mistral
         if arch == "qwen2vl":
             vsd = gguf_mmproj_loader(path)
+            sd.update(vsd)
+        elif arch == "qwen3vl":
+            # MiniMax H3 / Qwen3-VL: merge mmproj + fix tensor names for
+            # comfy's Qwen3VLVisionModel (deepstack ModuleList, fused qkv)
+            vsd = qwen3vl_vision_fixup(gguf_mmproj_loader(path))
             sd.update(vsd)
     else:
         pass
