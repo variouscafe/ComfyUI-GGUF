@@ -285,6 +285,13 @@ def qwen3vl_vision_fixup(vsd):
             k = f"visual.deepstack_merger_list.{idxs.index(blk)}.{part}.{rest}"
         elif ".attn_qkv." in k:
             k = k.replace(".attn_qkv.", ".attn.qkv.")
+        elif ".mlp.up_proj." in k:
+            # Qwen3.5 비전 MLP은 linear_fc1/linear_fc2 이름 (stock 맵의 up/down은 LLM 관례)
+            k = k.replace(".mlp.up_proj.", ".mlp.linear_fc1.")
+        elif ".mlp.down_proj." in k:
+            k = k.replace(".mlp.down_proj.", ".mlp.linear_fc2.")
+        elif k == "v.position_embd.weight":
+            continue  # comfy 비전 모델은 위치 임베딩 없이 RoP E 산출 — 잉여 키 제거
         out[k] = v
     return out
 
